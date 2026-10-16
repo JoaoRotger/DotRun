@@ -17,6 +17,16 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "taskDefinitions": [
+      {
+        "type": "dotrun",
+        "required": ["action", "target"],
+        "properties": {
+          "action": { "type": "string", "enum": ["build", "rebuild", "clean"], "description": "dotnet action to run" },
+          "target": { "type": "string", "description": "Path to the .sln, .slnx or .csproj" }
+        }
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         { "id": "dotrun", "title": "DotRun", "icon": "resources/dotrun.svg" }

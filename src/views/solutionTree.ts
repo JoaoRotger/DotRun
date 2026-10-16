@@ -1,83 +1,142 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { NoSolucao, contarProjetos, nomeSemExtensao, ordenar, parseSln, parseSlnx } from '../solution/parser';
+import {
+	ProjectNode, SolutionNode, fileNameWithoutExtension, listProjects, parseSln, parseSlnx, sortNodes,
+} from '../solution/parser';
+import { isExecutableProject } from '../solution/projectFile';
 
-export type NoArvore =
-	| { tipo: 'solucao'; nome: string; caminho: string; filhos: NoSolucao[] }
-	| NoSolucao;
+export type TreeNode =
+	| { kind: 'solution'; name: string; path: string; children: SolutionNode[] }
+	| SolutionNode;
 
-const EXCLUIR = '**/{node_modules,bin,obj}/**';
+const EXCLUDE = '**/{node_modules,bin,obj}/**';
+const STARTUP_KEY = 'dotrun.startupProject';
 
-export class SolutionTreeProvider implements vscode.TreeDataProvider<NoArvore> {
+export class SolutionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 	private _onDidChange = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this._onDidChange.event;
 
-	private raiz: NoArvore[] = [];
+	private roots: TreeNode[] = [];
+	private _solutionPath?: string;
+	private _projects: ProjectNode[] = [];
+	private _startupProject?: string;
 
-	async carregar() {
+	constructor(private readonly state: vscode.Memento) {}
+
+	get solutionPath() { return this._solutionPath; }
+	get projects(): readonly ProjectNode[] { return this._projects; }
+	get startupProject() { return this._startupProject; }
+
+	async load() {
 		try {
-			this.raiz = await this.lerWorkspace();
-		} catch (erro) {
-			this.raiz = [];
-			vscode.window.showErrorMessage(`DotRun: falha ao ler a solução: ${erro instanceof Error ? erro.message : erro}`);
+			await this.readWorkspace();
+			this._startupProject = await this.resolveStartupProject();
+		} catch (err) {
+			this.roots = [];
+			this._solutionPath = undefined;
+			this._projects = [];
+			this._startupProject = undefined;
+			vscode.window.showErrorMessage(`DotRun: falha ao ler a solução: ${err instanceof Error ? err.message : err}`);
 		}
-		await vscode.commands.executeCommand('setContext', 'dotrun.hasSolution', this.raiz.length > 0);
+		await vscode.commands.executeCommand('setContext', 'dotrun.hasSolution', this.roots.length > 0);
 		this._onDidChange.fire();
 	}
 
-	private async lerWorkspace(): Promise<NoArvore[]> {
-		const solucao = escolherSolucao(await vscode.workspace.findFiles('**/*.{sln,slnx}', EXCLUIR));
-		if (solucao) {
-			const texto = new TextDecoder().decode(await vscode.workspace.fs.readFile(solucao));
-			const dir = path.dirname(solucao.fsPath);
-			const filhos = solucao.fsPath.toLowerCase().endsWith('.slnx')
-				? parseSlnx(texto, dir)
-				: parseSln(texto, dir);
-			return [{ tipo: 'solucao', nome: nomeSemExtensao(solucao.fsPath), caminho: solucao.fsPath, filhos }];
-		}
-
-		// Sem solução: mostra os projetos soltos
-		const projetos = await vscode.workspace.findFiles('**/*.csproj', EXCLUIR);
-		return ordenar(projetos.map(u => ({ tipo: 'projeto', nome: nomeSemExtensao(u.fsPath), caminho: u.fsPath })));
+	async setStartupProject(projectPath: string) {
+		this._startupProject = projectPath;
+		await this.state.update(STARTUP_KEY, projectPath);
+		this._onDidChange.fire();
 	}
 
-	getTreeItem(no: NoArvore): vscode.TreeItem {
-		switch (no.tipo) {
-			case 'solucao': {
-				const n = contarProjetos(no.filhos);
+	private async readWorkspace() {
+		const solution = pickSolution(await vscode.workspace.findFiles('**/*.{sln,slnx}', EXCLUDE));
+		if (solution) {
+			const text = await readText(solution);
+			const dir = path.dirname(solution.fsPath);
+			const children = solution.fsPath.toLowerCase().endsWith('.slnx')
+				? parseSlnx(text, dir)
+				: parseSln(text, dir);
+			this.roots = [{ kind: 'solution', name: fileNameWithoutExtension(solution.fsPath), path: solution.fsPath, children }];
+			this._solutionPath = solution.fsPath;
+			this._projects = listProjects(children);
+			return;
+		}
+
+		// No solution: show the loose projects
+		const csprojs = await vscode.workspace.findFiles('**/*.csproj', EXCLUDE);
+		const projects = sortNodes(csprojs.map(u => ({ kind: 'project', name: fileNameWithoutExtension(u.fsPath), path: u.fsPath })));
+		this.roots = projects;
+		this._solutionPath = undefined;
+		this._projects = listProjects(projects);
+	}
+
+	// The user's pick wins while it's still in the solution; otherwise the first runnable project
+	private async resolveStartupProject(): Promise<string | undefined> {
+		const saved = this.state.get<string>(STARTUP_KEY);
+		const match = saved && this._projects.find(p => samePath(p.path, saved));
+		if (match) { return match.path; }
+
+		for (const project of this._projects) {
+			try {
+				if (isExecutableProject(await readText(vscode.Uri.file(project.path)))) {
+					return project.path;
+				}
+			} catch {
+				// Project listed in the solution but missing on disk
+			}
+		}
+		return undefined;
+	}
+
+	getTreeItem(node: TreeNode): vscode.TreeItem {
+		switch (node.kind) {
+			case 'solution': {
+				const count = listProjects(node.children).length;
 				const item = new vscode.TreeItem(
-					`Solução '${no.nome}' (${n} projeto${n === 1 ? '' : 's'})`,
+					`Solução '${node.name}' (${count} projeto${count === 1 ? '' : 's'})`,
 					vscode.TreeItemCollapsibleState.Expanded);
-				item.resourceUri = vscode.Uri.file(no.caminho);
-				item.tooltip = no.caminho;
+				item.resourceUri = vscode.Uri.file(node.path);
+				item.tooltip = node.path;
 				item.contextValue = 'solution';
 				return item;
 			}
-			case 'pasta': {
-				const item = new vscode.TreeItem(no.nome, vscode.TreeItemCollapsibleState.Expanded);
+			case 'folder': {
+				const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Expanded);
 				item.iconPath = vscode.ThemeIcon.Folder;
 				item.contextValue = 'folder';
 				return item;
 			}
-			case 'projeto': {
-				const item = new vscode.TreeItem(no.nome, vscode.TreeItemCollapsibleState.None);
-				item.resourceUri = vscode.Uri.file(no.caminho);
-				item.tooltip = no.caminho;
+			case 'project': {
+				const isStartup = this._startupProject !== undefined && samePath(node.path, this._startupProject);
+				const item = new vscode.TreeItem(
+					isStartup ? { label: node.name, highlights: [[0, node.name.length]] } : node.name,
+					vscode.TreeItemCollapsibleState.None);
+				item.resourceUri = vscode.Uri.file(node.path);
+				item.description = isStartup ? 'inicialização' : undefined;
+				item.tooltip = node.path;
 				item.contextValue = 'project';
 				return item;
 			}
 		}
 	}
 
-	getChildren(no?: NoArvore): NoArvore[] {
-		if (!no) { return this.raiz; }
-		return no.tipo === 'projeto' ? [] : no.filhos;
+	getChildren(node?: TreeNode): TreeNode[] {
+		if (!node) { return this.roots; }
+		return node.kind === 'project' ? [] : node.children;
 	}
 }
 
-// Com várias soluções, fica com a mais próxima da raiz (empate: ordem alfabética)
-function escolherSolucao(uris: vscode.Uri[]): vscode.Uri | undefined {
-	const profundidade = (u: vscode.Uri) => u.fsPath.split(/[\\/]/).length;
-	return [...uris].sort((a, b) =>
-		profundidade(a) - profundidade(b) || a.fsPath.localeCompare(b.fsPath))[0];
+// With several solutions, take the one closest to the root (ties: alphabetical)
+function pickSolution(uris: vscode.Uri[]): vscode.Uri | undefined {
+	const depth = (u: vscode.Uri) => u.fsPath.split(/[\\/]/).length;
+	return [...uris].sort((a, b) => depth(a) - depth(b) || a.fsPath.localeCompare(b.fsPath))[0];
+}
+
+async function readText(uri: vscode.Uri): Promise<string> {
+	return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+}
+
+function samePath(a: string, b: string): boolean {
+	const normalize = (p: string) => process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p);
+	return normalize(a) === normalize(b);
 }
