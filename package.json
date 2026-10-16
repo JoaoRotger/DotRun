@@ -1,0 +1,97 @@
+{
+  "name": "dotrun",
+  "displayName": "DotRun",
+  "description": "Painel estilo Visual Studio para projetos .NET",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.140.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionDependencies": ["ms-dotnettools.csharp"],
+  "activationEvents": [
+    "workspaceContains:**/*.sln",
+    "workspaceContains:**/*.slnx",
+    "workspaceContains:**/*.csproj"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "dotrun", "title": "DotRun", "icon": "resources/dotrun.svg" }
+      ]
+    },
+    "views": {
+      "dotrun": [
+        { "id": "dotrun.solution", "name": "Solução", "when": "dotrun.hasSolution" }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "dotrun.solution",
+        "contents": "Nenhum projeto carregado ainda."
+      }
+    ],
+    "commands": [
+      { "command": "dotrun.start",        "title": "Iniciar",                               "category": "DotRun", "icon": "$(debug-start)" },
+      { "command": "dotrun.startNoDebug", "title": "Iniciar sem debug",                     "category": "DotRun", "icon": "$(run)" },
+      { "command": "dotrun.stop",         "title": "Parar",                                 "category": "DotRun", "icon": "$(debug-stop)" },
+      { "command": "dotrun.build",        "title": "Build",                                 "category": "DotRun", "icon": "$(tools)" },
+      { "command": "dotrun.rebuild",      "title": "Rebuild",                               "category": "DotRun", "icon": "$(refresh)" },
+      { "command": "dotrun.clean",        "title": "Clean",                                 "category": "DotRun", "icon": "$(trash)" },
+      { "command": "dotrun.selectConfig", "title": "Selecionar configuração",               "category": "DotRun" },
+      { "command": "dotrun.setStartup",   "title": "Definir como projeto de inicialização", "category": "DotRun" },
+      { "command": "dotrun.buildProject", "title": "Buildar este projeto",                  "category": "DotRun", "icon": "$(tools)" }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "dotrun.setStartup",   "when": "false" },
+        { "command": "dotrun.buildProject", "when": "false" }
+      ],
+      "view/title": [
+        { "command": "dotrun.start",        "when": "view == dotrun.solution", "group": "navigation@1" },
+        { "command": "dotrun.startNoDebug", "when": "view == dotrun.solution", "group": "navigation@2" },
+        { "command": "dotrun.stop",         "when": "view == dotrun.solution", "group": "navigation@3" },
+        { "command": "dotrun.build",        "when": "view == dotrun.solution", "group": "navigation@4" },
+        { "command": "dotrun.rebuild",      "when": "view == dotrun.solution", "group": "1_build@1" },
+        { "command": "dotrun.clean",        "when": "view == dotrun.solution", "group": "1_build@2" },
+        { "command": "dotrun.selectConfig", "when": "view == dotrun.solution", "group": "2_config@1" }
+      ],
+      "view/item/context": [
+        { "command": "dotrun.buildProject", "when": "view == dotrun.solution && viewItem == project", "group": "inline" },
+        { "command": "dotrun.setStartup",   "when": "view == dotrun.solution && viewItem == project", "group": "1_startup" }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.140.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "24.x",
+    "typescript-eslint": "^8.61.1",
+    "eslint": "^10.5.0",
+    "esbuild": "^0.28.1",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^6.0.3",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0"
+  },
+  "overrides": {
+    "diff": "^8.0.4",
+    "serialize-javascript": "^7.0.6"
+  }
+}
