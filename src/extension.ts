@@ -26,14 +26,23 @@ export async function activate(context: vscode.ExtensionContext) {
 		context.subscriptions.push(vscode.commands.registerCommand(id, fn));
 	}
 
-	// A extensão também ativa ao rodar um comando pelo palette, então confere de fato se há .NET na pasta
-	// antes de mostrar o painel.
-	const encontrados = await vscode.workspace.findFiles(
-		'**/*.{sln,slnx,csproj}',
-		'**/{node_modules,bin,obj}/**',
-		1
+	// A extensão também ativa ao rodar um comando pelo palette, então o carregar() confere de fato se há
+	// .NET na pasta antes de mostrar o painel.
+	await tree.carregar();
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const recarregar = () => {
+		clearTimeout(timer);
+		timer = setTimeout(() => tree.carregar(), 300);
+	};
+	const watcher = vscode.workspace.createFileSystemWatcher('**/*.{sln,slnx,csproj}');
+	context.subscriptions.push(
+		watcher,
+		watcher.onDidCreate(recarregar),
+		watcher.onDidChange(recarregar),
+		watcher.onDidDelete(recarregar),
+		{ dispose: () => clearTimeout(timer) }
 	);
-	await vscode.commands.executeCommand('setContext', 'dotrun.hasSolution', encontrados.length > 0);
 }
 
 export function deactivate() {}
