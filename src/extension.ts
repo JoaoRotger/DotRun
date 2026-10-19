@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { BuildAction, runDotnet } from './build/dotnet';
 import { SolutionTreeProvider, TreeNode } from './views/solutionTree';
@@ -32,14 +33,37 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (picked) { await tree.setConfiguration(picked.label); }
 	};
 
+	// Same list as the Visual Studio dropdown: runnable projects only, alphabetical.
+	// If none is detected as runnable, every project is offered instead.
+	const selectStartupProject = async () => {
+		const candidates = tree.startupCandidates.length > 0 ? tree.startupCandidates : tree.projects;
+		const baseDir = tree.solutionPath ? path.dirname(tree.solutionPath) : undefined;
+		const picked = await vscode.window.showQuickPick(
+			[...candidates].sort((a, b) => a.name.localeCompare(b.name)).map(p => ({
+				label: p.name,
+				description: p.path === tree.startupProject ? 'atual' : undefined,
+				detail: baseDir ? path.relative(baseDir, path.dirname(p.path)) || undefined : undefined,
+				path: p.path,
+			})),
+			{ placeHolder: 'Projeto de inicialização', matchOnDetail: true });
+		if (picked) { await tree.setStartupProject(picked.path); }
+	};
+
 	const configurationStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	configurationStatus.command = 'dotrun.selectConfig';
 	configurationStatus.tooltip = 'DotRun: configuração de build';
-	const updateConfigurationStatus = () => {
+	const startupStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+	startupStatus.command = 'dotrun.selectStartup';
+	startupStatus.tooltip = 'DotRun: projeto de inicialização';
+	const updateStatusBar = () => {
+		const startup = tree.projects.find(p => p.path === tree.startupProject);
 		configurationStatus.text = `$(gear) ${tree.configuration}`;
-		if (tree.projects.length > 0) { configurationStatus.show(); } else { configurationStatus.hide(); }
+		startupStatus.text = `$(project) ${startup?.name ?? 'Selecionar projeto'}`;
+		for (const item of [configurationStatus, startupStatus]) {
+			if (tree.projects.length > 0) { item.show(); } else { item.hide(); }
+		}
 	};
-	context.subscriptions.push(configurationStatus, tree.onDidChangeTreeData(updateConfigurationStatus));
+	context.subscriptions.push(configurationStatus, startupStatus, tree.onDidChangeTreeData(updateStatusBar));
 
 	const commands: Record<string, (...args: any[]) => unknown> = {
 		'dotrun.start':        stub('Iniciar'),
@@ -49,6 +73,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		'dotrun.rebuild':      runOnSolution('rebuild'),
 		'dotrun.clean':        runOnSolution('clean'),
 		'dotrun.selectConfig': selectConfiguration,
+		'dotrun.selectStartup': selectStartupProject,
 		'dotrun.setStartup':   (node?: TreeNode) => node?.kind === 'project' && tree.setStartupProject(node.path),
 		'dotrun.buildProject': (node?: TreeNode) => node?.kind === 'project' && runDotnet('build', node.path, tree.configuration),
 	};

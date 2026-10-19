@@ -120,6 +120,13 @@ suite('Executable project detection', () => {
 		assert.ok(isExecutableProject(csproj('Microsoft.NET.Sdk.Web')));
 	});
 
+	test('legacy ASP.NET web application is executable despite OutputType Library', () => {
+		assert.ok(isExecutableProject(
+			'<Project ToolsVersion="15.0"><PropertyGroup><OutputType>Library</OutputType>'
+			+ '<ProjectTypeGuids>{349c5851-65df-11da-9384-00065b846f21};{fae04ec0-301f-11d3-bf4b-00c04f79efbc}</ProjectTypeGuids>'
+			+ '</PropertyGroup></Project>'));
+	});
+
 	test('test project is not executable even with OutputType Exe', () => {
 		assert.ok(!isExecutableProject(csproj('Microsoft.NET.Sdk', '<OutputType>Exe</OutputType><IsTestProject>true</IsTestProject>')));
 		assert.ok(!isExecutableProject(

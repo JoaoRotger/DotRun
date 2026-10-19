@@ -6,6 +6,11 @@ export function isExecutableProject(csproj: string): boolean {
 		return false;
 	}
 
+	// Legacy ASP.NET web application: OutputType is Library, the project type GUID marks it as web
+	if (/<ProjectTypeGuids>[^<]*349C5851-65DF-11DA-9384-00065B846F21/i.test(csproj)) {
+		return true;
+	}
+
 	const outputType = /<OutputType>\s*(\w+)\s*<\/OutputType>/i.exec(csproj)?.[1].toLowerCase();
 	if (outputType) {
 		return outputType === 'exe' || outputType === 'winexe';

@@ -22,6 +22,7 @@ export class SolutionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 	private _solutionPath?: string;
 	private _projects: ProjectNode[] = [];
 	private _startupProject?: string;
+	private _startupCandidates: ProjectNode[] = [];
 	private _configurations = DEFAULT_CONFIGURATIONS;
 	private _configuration = DEFAULT_CONFIGURATIONS[0];
 
@@ -30,18 +31,22 @@ export class SolutionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 	get solutionPath() { return this._solutionPath; }
 	get projects(): readonly ProjectNode[] { return this._projects; }
 	get startupProject() { return this._startupProject; }
+	/** Projects that can be started, like the Visual Studio startup dropdown */
+	get startupCandidates(): readonly ProjectNode[] { return this._startupCandidates; }
 	get configurations(): readonly string[] { return this._configurations; }
 	get configuration() { return this._configuration; }
 
 	async load() {
 		try {
 			await this.readWorkspace();
-			this._startupProject = await this.resolveStartupProject();
+			this._startupCandidates = await this.findExecutableProjects();
+			this._startupProject = this.resolveStartupProject();
 		} catch (err) {
 			this.roots = [];
 			this._solutionPath = undefined;
 			this._projects = [];
 			this._startupProject = undefined;
+			this._startupCandidates = [];
 			this._configurations = DEFAULT_CONFIGURATIONS;
 			vscode.window.showErrorMessage(`DotRun: falha ao ler a solução: ${err instanceof Error ? err.message : err}`);
 		}
@@ -90,21 +95,22 @@ export class SolutionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 	}
 
 	// The user's pick wins while it's still in the solution; otherwise the first runnable project
-	private async resolveStartupProject(): Promise<string | undefined> {
+	private resolveStartupProject(): string | undefined {
 		const saved = this.state.get<string>(STARTUP_KEY);
 		const match = saved && this._projects.find(p => samePath(p.path, saved));
-		if (match) { return match.path; }
+		return match ? match.path : this._startupCandidates[0]?.path;
+	}
 
-		for (const project of this._projects) {
+	private async findExecutableProjects(): Promise<ProjectNode[]> {
+		const executable = await Promise.all(this._projects.map(async project => {
 			try {
-				if (isExecutableProject(await readText(vscode.Uri.file(project.path)))) {
-					return project.path;
-				}
+				return isExecutableProject(await readText(vscode.Uri.file(project.path)));
 			} catch {
 				// Project listed in the solution but missing on disk
+				return false;
 			}
-		}
-		return undefined;
+		}));
+		return this._projects.filter((_, i) => executable[i]);
 	}
 
 	getTreeItem(node: TreeNode): vscode.TreeItem {
