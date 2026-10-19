@@ -1,7 +1,8 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
-	ProjectNode, SolutionNode, fileNameWithoutExtension, listProjects, parseSln, parseSlnx, sortNodes,
+	DEFAULT_CONFIGURATIONS, ProjectNode, SolutionNode, fileNameWithoutExtension, listProjects,
+	parseSln, parseSlnConfigurations, parseSlnx, parseSlnxConfigurations, sortNodes,
 } from '../solution/parser';
 import { isExecutableProject } from '../solution/projectFile';
 
@@ -11,6 +12,7 @@ export type TreeNode =
 
 const EXCLUDE = '**/{node_modules,bin,obj}/**';
 const STARTUP_KEY = 'dotrun.startupProject';
+const CONFIGURATION_KEY = 'dotrun.configuration';
 
 export class SolutionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 	private _onDidChange = new vscode.EventEmitter<void>();
@@ -20,12 +22,16 @@ export class SolutionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 	private _solutionPath?: string;
 	private _projects: ProjectNode[] = [];
 	private _startupProject?: string;
+	private _configurations = DEFAULT_CONFIGURATIONS;
+	private _configuration = DEFAULT_CONFIGURATIONS[0];
 
 	constructor(private readonly state: vscode.Memento) {}
 
 	get solutionPath() { return this._solutionPath; }
 	get projects(): readonly ProjectNode[] { return this._projects; }
 	get startupProject() { return this._startupProject; }
+	get configurations(): readonly string[] { return this._configurations; }
+	get configuration() { return this._configuration; }
 
 	async load() {
 		try {
@@ -36,8 +42,14 @@ export class SolutionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 			this._solutionPath = undefined;
 			this._projects = [];
 			this._startupProject = undefined;
+			this._configurations = DEFAULT_CONFIGURATIONS;
 			vscode.window.showErrorMessage(`DotRun: falha ao ler a solução: ${err instanceof Error ? err.message : err}`);
 		}
+		// Keep the saved pick while the solution still has it; otherwise prefer Debug
+		const saved = this.state.get<string>(CONFIGURATION_KEY);
+		this._configuration = this._configurations.find(c => c === saved)
+			?? this._configurations.find(c => c.toLowerCase() === 'debug')
+			?? this._configurations[0];
 		await vscode.commands.executeCommand('setContext', 'dotrun.hasSolution', this.roots.length > 0);
 		this._onDidChange.fire();
 	}
@@ -48,14 +60,20 @@ export class SolutionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 		this._onDidChange.fire();
 	}
 
+	async setConfiguration(configuration: string) {
+		this._configuration = configuration;
+		await this.state.update(CONFIGURATION_KEY, configuration);
+		this._onDidChange.fire();
+	}
+
 	private async readWorkspace() {
 		const solution = pickSolution(await vscode.workspace.findFiles('**/*.{sln,slnx}', EXCLUDE));
 		if (solution) {
 			const text = await readText(solution);
 			const dir = path.dirname(solution.fsPath);
-			const children = solution.fsPath.toLowerCase().endsWith('.slnx')
-				? parseSlnx(text, dir)
-				: parseSln(text, dir);
+			const isSlnx = solution.fsPath.toLowerCase().endsWith('.slnx');
+			const children = isSlnx ? parseSlnx(text, dir) : parseSln(text, dir);
+			this._configurations = isSlnx ? parseSlnxConfigurations(text) : parseSlnConfigurations(text);
 			this.roots = [{ kind: 'solution', name: fileNameWithoutExtension(solution.fsPath), path: solution.fsPath, children }];
 			this._solutionPath = solution.fsPath;
 			this._projects = listProjects(children);
@@ -67,6 +85,7 @@ export class SolutionTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 		const projects = sortNodes(csprojs.map(u => ({ kind: 'project', name: fileNameWithoutExtension(u.fsPath), path: u.fsPath })));
 		this.roots = projects;
 		this._solutionPath = undefined;
+		this._configurations = DEFAULT_CONFIGURATIONS;
 		this._projects = listProjects(projects);
 	}
 

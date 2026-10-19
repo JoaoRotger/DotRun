@@ -22,8 +22,24 @@ export async function activate(context: vscode.ExtensionContext) {
 				'DotRun: nenhuma solução encontrada. Defina um projeto de inicialização ou use "Buildar este projeto".');
 			return;
 		}
-		await runDotnet(action, target);
+		await runDotnet(action, target, tree.configuration);
 	};
+
+	const selectConfiguration = async () => {
+		const picked = await vscode.window.showQuickPick(
+			tree.configurations.map(c => ({ label: c, description: c === tree.configuration ? 'atual' : undefined })),
+			{ placeHolder: 'Configuração de build' });
+		if (picked) { await tree.setConfiguration(picked.label); }
+	};
+
+	const configurationStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+	configurationStatus.command = 'dotrun.selectConfig';
+	configurationStatus.tooltip = 'DotRun: configuração de build';
+	const updateConfigurationStatus = () => {
+		configurationStatus.text = `$(gear) ${tree.configuration}`;
+		if (tree.projects.length > 0) { configurationStatus.show(); } else { configurationStatus.hide(); }
+	};
+	context.subscriptions.push(configurationStatus, tree.onDidChangeTreeData(updateConfigurationStatus));
 
 	const commands: Record<string, (...args: any[]) => unknown> = {
 		'dotrun.start':        stub('Iniciar'),
@@ -32,9 +48,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		'dotrun.build':        runOnSolution('build'),
 		'dotrun.rebuild':      runOnSolution('rebuild'),
 		'dotrun.clean':        runOnSolution('clean'),
-		'dotrun.selectConfig': stub('Selecionar configuração'),
+		'dotrun.selectConfig': selectConfiguration,
 		'dotrun.setStartup':   (node?: TreeNode) => node?.kind === 'project' && tree.setStartupProject(node.path),
-		'dotrun.buildProject': (node?: TreeNode) => node?.kind === 'project' && runDotnet('build', node.path),
+		'dotrun.buildProject': (node?: TreeNode) => node?.kind === 'project' && runDotnet('build', node.path, tree.configuration),
 	};
 
 	for (const [id, fn] of Object.entries(commands)) {

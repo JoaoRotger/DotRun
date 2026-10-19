@@ -1,6 +1,8 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import { listProjects, parseSln, parseSlnx } from '../solution/parser';
+import {
+	listProjects, parseSln, parseSlnConfigurations, parseSlnx, parseSlnxConfigurations,
+} from '../solution/parser';
 import { isExecutableProject } from '../solution/projectFile';
 
 const DIR = path.resolve('/repo');
@@ -60,6 +62,44 @@ suite('Solution parser', () => {
 			{ kind: 'project', name: 'Tool', path: path.join(DIR, 'Tool', 'Tool.csproj') },
 		]);
 		assert.deepStrictEqual(listProjects(nodes).map(p => p.name), ['Api', 'Tool']);
+	});
+});
+
+suite('Solution configurations', () => {
+	test('.sln: unique names, platform ignored', () => {
+		const sln = [
+			'Global',
+			'\tGlobalSection(SolutionConfigurationPlatforms) = preSolution',
+			'\t\tDebug|Any CPU = Debug|Any CPU',
+			'\t\tDebug|x64 = Debug|x64',
+			'\t\tStaging|Any CPU = Staging|Any CPU',
+			'\t\tRelease|Any CPU = Release|Any CPU',
+			'\tEndGlobalSection',
+			'\tGlobalSection(ProjectConfigurationPlatforms) = postSolution',
+			'\t\t{11111111-1111-1111-1111-111111111111}.Other|Any CPU.ActiveCfg = Other|Any CPU',
+			'\tEndGlobalSection',
+			'EndGlobal',
+		].join('\r\n');
+		assert.deepStrictEqual(parseSlnConfigurations(sln), ['Debug', 'Staging', 'Release']);
+	});
+
+	test('.sln without the section falls back to Debug/Release', () => {
+		assert.deepStrictEqual(parseSlnConfigurations('Global\r\nEndGlobal'), ['Debug', 'Release']);
+	});
+
+	test('.slnx: only BuildType entries inside <Configurations>', () => {
+		const slnx = `<Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Staging" />
+    <Platform Name="Any CPU" />
+  </Configurations>
+  <Project Path="App/App.csproj">
+    <BuildType Solution="Staging|*" Project="Release" />
+  </Project>
+</Solution>`;
+		assert.deepStrictEqual(parseSlnxConfigurations(slnx), ['Debug', 'Staging']);
+		assert.deepStrictEqual(parseSlnxConfigurations('<Solution />'), ['Debug', 'Release']);
 	});
 });
 

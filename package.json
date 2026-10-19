@@ -23,7 +23,8 @@
         "required": ["action", "target"],
         "properties": {
           "action": { "type": "string", "enum": ["build", "rebuild", "clean"], "description": "dotnet action to run" },
-          "target": { "type": "string", "description": "Path to the .sln, .slnx or .csproj" }
+          "target": { "type": "string", "description": "Path to the .sln, .slnx or .csproj" },
+          "configuration": { "type": "string", "description": "Build configuration, e.g. Debug or Release" }
         }
       }
     ],

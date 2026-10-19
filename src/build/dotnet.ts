@@ -12,7 +12,7 @@ const LABELS: Record<BuildAction, string> = {
 let running = false;
 
 /** Runs dotnet build/clean on a .sln/.slnx/.csproj as a VS Code task. Resolves to true on exit code 0. */
-export async function runDotnet(action: BuildAction, target: string): Promise<boolean> {
+export async function runDotnet(action: BuildAction, target: string, configuration: string): Promise<boolean> {
 	if (running) {
 		vscode.window.showWarningMessage('DotRun: já existe um build em andamento.');
 		return false;
@@ -21,16 +21,16 @@ export async function runDotnet(action: BuildAction, target: string): Promise<bo
 	running = true;
 	try {
 		await vscode.workspace.saveAll(false);
-		return await executeAndWait(createTask(action, target));
+		return await executeAndWait(createTask(action, target, configuration));
 	} finally {
 		running = false;
 	}
 }
 
-function createTask(action: BuildAction, target: string): vscode.Task {
+function createTask(action: BuildAction, target: string, configuration: string): vscode.Task {
 	const args = action === 'clean'
-		? ['clean', target]
-		: ['build', target, ...(action === 'rebuild' ? ['--no-incremental'] : [])];
+		? ['clean', target, '-c', configuration]
+		: ['build', target, '-c', configuration, ...(action === 'rebuild' ? ['--no-incremental'] : [])];
 	// Full paths and no summary keep $msCompile from missing or duplicating diagnostics
 	args.push('-nologo', '/property:GenerateFullPaths=true', '/consoleloggerparameters:NoSummary');
 
@@ -43,9 +43,9 @@ function createTask(action: BuildAction, target: string): vscode.Task {
 
 	const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(target));
 	const task = new vscode.Task(
-		{ type: 'dotrun', action, target },
+		{ type: 'dotrun', action, target, configuration },
 		folder ?? vscode.TaskScope.Workspace,
-		`${LABELS[action]} ${path.basename(target)}`,
+		`${LABELS[action]} ${path.basename(target)} (${configuration})`,
 		'DotRun',
 		execution,
 		'$msCompile'

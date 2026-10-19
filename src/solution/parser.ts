@@ -61,6 +61,22 @@ export function parseSlnx(text: string, solutionDir: string): SolutionNode[] {
 	return sortNodes(roots);
 }
 
+export const DEFAULT_CONFIGURATIONS: readonly string[] = ['Debug', 'Release'];
+
+// Configuration names from "Debug|Any CPU = Debug|Any CPU" lines; the platform part is ignored
+export function parseSlnConfigurations(text: string): readonly string[] {
+	const section = /GlobalSection\(SolutionConfigurationPlatforms\)[^\n]*\n([\s\S]*?)EndGlobalSection/.exec(text);
+	const names = section ? [...section[1].matchAll(/^\s*([^|=\r\n]+?)\|/gm)].map(m => m[1]) : [];
+	return names.length ? [...new Set(names)] : DEFAULT_CONFIGURATIONS;
+}
+
+// .slnx only lists configurations when they differ from Debug/Release
+export function parseSlnxConfigurations(text: string): readonly string[] {
+	const section = /<Configurations>([\s\S]*?)<\/Configurations>/.exec(text.replace(/<!--[\s\S]*?-->/g, ''));
+	const names = section ? [...section[1].matchAll(/<BuildType\b([^>]*)>/g)].flatMap(m => attribute(m[1], 'Name') ?? []) : [];
+	return names.length ? [...new Set(names)] : DEFAULT_CONFIGURATIONS;
+}
+
 export function fileNameWithoutExtension(filePath: string): string {
 	const fileName = filePath.replace(/\\/g, '/').split('/').pop() ?? filePath;
 	return fileName.replace(/\.[^.]+$/, '');
