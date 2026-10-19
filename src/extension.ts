@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { BuildAction, runDotnet } from './build/dotnet';
+import { DOTRUN_LAUNCH, createLaunchConfig, readLaunchProfile, resolveProjectOutput } from './launch';
 import { SolutionTreeProvider, TreeNode } from './views/solutionTree';
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -8,9 +9,6 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.registerTreeDataProvider('dotrun.solution', tree)
 	);
-
-	const stub = (name: string) => () =>
-		vscode.window.showInformationMessage(`${name}: ainda não implementado`);
 
 	// Without a solution, fall back to the startup project (or the only project there is)
 	const buildTarget = () =>
@@ -25,6 +23,54 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 		await runDotnet(action, target, tree.configuration);
 	};
+
+	// Only one DotRun session at a time, like Visual Studio; Stop leaves other debug sessions alone
+	let session: vscode.DebugSession | undefined;
+	let starting = false;
+	const setRunning = (running: boolean) => {
+		vscode.commands.executeCommand('setContext', 'dotrun.running', running);
+		updateStatusBar();
+	};
+	context.subscriptions.push(
+		vscode.debug.onDidStartDebugSession(s => {
+			if (s.configuration[DOTRUN_LAUNCH]) { session = s; setRunning(true); }
+		}),
+		vscode.debug.onDidTerminateDebugSession(s => {
+			if (s === session) { session = undefined; setRunning(false); }
+		}),
+	);
+
+	const start = (noDebug: boolean) => async () => {
+		if (session || starting) {
+			vscode.window.showWarningMessage('DotRun: o projeto já está em execução.');
+			return;
+		}
+		const project = tree.startupProject;
+		if (!project) {
+			vscode.window.showWarningMessage('DotRun: nenhum projeto de inicialização definido.');
+			return;
+		}
+
+		starting = true;
+		try {
+			if (!await runDotnet('build', project, tree.configuration)) {
+				await vscode.commands.executeCommand('workbench.actions.view.problems');
+				return;
+			}
+			const [output, profile] = await Promise.all([
+				resolveProjectOutput(project, tree.configuration),
+				readLaunchProfile(project),
+			]);
+			const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project));
+			await vscode.debug.startDebugging(folder, createLaunchConfig(project, output, profile, noDebug));
+		} catch (err) {
+			vscode.window.showErrorMessage(`DotRun: falha ao iniciar: ${err instanceof Error ? err.message : err}`);
+		} finally {
+			starting = false;
+		}
+	};
+
+	const stop = () => session && vscode.debug.stopDebugging(session);
 
 	const selectConfiguration = async () => {
 		const picked = await vscode.window.showQuickPick(
@@ -55,20 +101,24 @@ export async function activate(context: vscode.ExtensionContext) {
 	const startupStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
 	startupStatus.command = 'dotrun.selectStartup';
 	startupStatus.tooltip = 'DotRun: projeto de inicialização';
-	const updateStatusBar = () => {
+	const runStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+	function updateStatusBar() {
 		const startup = tree.projects.find(p => p.path === tree.startupProject);
 		configurationStatus.text = `$(gear) ${tree.configuration}`;
 		startupStatus.text = `$(project) ${startup?.name ?? 'Selecionar projeto'}`;
-		for (const item of [configurationStatus, startupStatus]) {
+		runStatus.text = session ? '$(debug-stop) Parar' : '$(debug-start) Iniciar';
+		runStatus.command = session ? 'dotrun.stop' : 'dotrun.start';
+		runStatus.tooltip = session ? 'DotRun: parar' : 'DotRun: iniciar com debug';
+		for (const item of [configurationStatus, startupStatus, runStatus]) {
 			if (tree.projects.length > 0) { item.show(); } else { item.hide(); }
 		}
-	};
-	context.subscriptions.push(configurationStatus, startupStatus, tree.onDidChangeTreeData(updateStatusBar));
+	}
+	context.subscriptions.push(configurationStatus, startupStatus, runStatus, tree.onDidChangeTreeData(updateStatusBar));
 
 	const commands: Record<string, (...args: any[]) => unknown> = {
-		'dotrun.start':        stub('Iniciar'),
-		'dotrun.startNoDebug': stub('Iniciar sem debug'),
-		'dotrun.stop':         stub('Parar'),
+		'dotrun.start':        start(false),
+		'dotrun.startNoDebug': start(true),
+		'dotrun.stop':         stop,
 		'dotrun.build':        runOnSolution('build'),
 		'dotrun.rebuild':      runOnSolution('rebuild'),
 		'dotrun.clean':        runOnSolution('clean'),

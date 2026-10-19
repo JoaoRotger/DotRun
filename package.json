@@ -62,9 +62,9 @@
         { "command": "dotrun.buildProject", "when": "false" }
       ],
       "view/title": [
-        { "command": "dotrun.start",        "when": "view == dotrun.solution", "group": "navigation@1" },
-        { "command": "dotrun.startNoDebug", "when": "view == dotrun.solution", "group": "navigation@2" },
-        { "command": "dotrun.stop",         "when": "view == dotrun.solution", "group": "navigation@3" },
+        { "command": "dotrun.start",        "when": "view == dotrun.solution && !dotrun.running", "group": "navigation@1" },
+        { "command": "dotrun.startNoDebug", "when": "view == dotrun.solution && !dotrun.running", "group": "navigation@2" },
+        { "command": "dotrun.stop",         "when": "view == dotrun.solution && dotrun.running",  "group": "navigation@3" },
         { "command": "dotrun.build",        "when": "view == dotrun.solution", "group": "navigation@4" },
         { "command": "dotrun.rebuild",      "when": "view == dotrun.solution", "group": "1_build@1" },
         { "command": "dotrun.clean",        "when": "view == dotrun.solution", "group": "1_build@2" },
